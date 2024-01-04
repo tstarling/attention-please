@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<title>Attention please demo</title>
+	<script>
+window.addEventListener( 'load', function () {
+	const DEMO_ANSWERS = [
+		3.0,
+		10.252,
+		12.093,
+		14.026,
+		18.477,
+		23.801
+	];
+
+	const SCORE_EARLY = -1;
+	const SCORE_TIMEOUT = 4;
+	const HINT_TIME = 8;
+	const START_DELAY = 0.5;
+
+	const container = document.getElementById( 'container' );
+	const AudioContext = window.AudioContext || window.webkitAudioContext;
+	let audioContext;
+	let audioBuffer;
+	let audioSource;
+	let unobfuscatedAudioData;
+	let mode = 'start';
+	let resolveStart;
+	const startPromise = new Promise( ( resolve, reject ) => {
+		resolveStart = resolve;
+	} );
+	let startTime;
+	let clickTimes = [];
+
+	function message( msg ) {
+		const p = document.createElement( 'p' );
+		p.role = 'alert';
+		p.textContent = msg;
+		container.appendChild( p );
+	}
+
+	function addButton() {
+		const button = document.createElement( 'button' );
+		button.textContent = 'Click here';
+		button.addEventListener( 'click', async function () {
+			if ( mode === 'start' || mode === 'hint' ) {
+				await setupAudio();
+				startTime = audioContext.currentTime + START_DELAY;
+				audioSource.addEventListener( 'ended', () => {
+					if ( mode === 'play' ) {
+						end();
+					}
+				} );
+				window.setTimeout( checkHint, ( HINT_TIME + START_DELAY ) * 1000 );
+				audioSource.start( startTime );
+				mode = 'play';
+			} else if ( mode === 'play' ) {
+				clickTimes.push( audioContext.currentTime - startTime );
+			}
+		} );
+		container.appendChild( button );
+	}
+
+	async function loadAudio() {
+		const response = await fetch( 'demo1.bin' );
+		const buffer = await response.arrayBuffer();
+		const view = new DataView( buffer );
+		const key = 505903104 ^ parseInt( response.headers.get( 'APKey' ) );
+		for ( let offset = 0; offset < buffer.byteLength; offset += 4 ) {
+			view.setInt32( offset, view.getInt32( offset ) ^ key );
+		}
+		unobfuscatedAudioData = buffer;
+	}
+
+	function end() {
+		mode = 'ended';
+		const answers = DEMO_ANSWERS;
+		let answerIndex = 0;
+		let score = 0;
+		outer: for ( const t of clickTimes ) {
+			if ( answerIndex >= answers.length ) {
+				console.log( "Click at time " + t + ": past the end" );
+				score += SCORE_EARLY;
+				continue;
+			}
+			while ( t > answers[answerIndex] + SCORE_TIMEOUT ) {
+				answerIndex ++;
+				if ( answerIndex === answers.length ) {
+					console.log( "Click at time " + t + ": reached the end" );
+					break outer;
+				}
+			}
+			if ( t < answers[answerIndex] ) {
+				console.log( "Click at time " + t + ": early" );
+				score += SCORE_EARLY;
+				continue;
+			}
+			const clickScore = ( answers[answerIndex] + SCORE_TIMEOUT - t ) / SCORE_TIMEOUT;
+			score += clickScore;
+			console.log( "Click at time " + t + ": " + clickScore );
+			// Consume answer
+			answerIndex ++;
+		}
+		if ( score < 0 ) {
+			score = 0;
+		}
+		score = Math.round( score / answers.length * 100 );
+		message( 'Your score was ' + score + ' / 100' );
+	}
+
+	function checkHint() {
+		if ( clickTimes.length > 0 ) {
+			return;
+		}
+		audioSource.stop();
+		mode = 'hint';
+		message( "That was it, you missed it! Let's try again. Be sure to click the button after you hear the sound." );
+	}
+
+	async function setupAudio() {
+		if ( !audioContext ) {
+			// Defer to avoid error "An AudioContext was prevented from starting automatically.
+			// It must be created or resumed after a user gesture on the page."
+			audioContext = new AudioContext();
+			audioBuffer = await audioContext.decodeAudioData( unobfuscatedAudioData );
+		}
+		audioSource = audioContext.createBufferSource();
+		audioSource.buffer = audioBuffer;
+		audioSource.connect( audioContext.destination );
+	}
+
+	async function main() {
+		await loadAudio();
+		container.innerText = '';
+		message( 'Listen for someone tapping a glass with a spoon. Click the button each time you hear this sound. ' +
+			'Click the button to begin.' );
+		addButton();
+	}
+
+	main();
+} );
+	</script>
+</head>
+<body>
+<h1>Attention please demo</h1>
+<div id="container">
+	<p>Loading...</p>
+</div>
+</body>
